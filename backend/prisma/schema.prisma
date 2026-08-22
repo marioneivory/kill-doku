@@ -1,0 +1,223 @@
+// Kill-Doku — Schema Prisma
+// Vedi ARCHITECTURE.md per il razionale delle scelte.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// ENUM
+// ---------------------------------------------------------------------------
+
+enum Theme {
+  LIGHT
+  DARK
+}
+
+enum StoryStatus {
+  LOCKED
+  UNLOCKED
+  COMPLETED
+}
+
+enum PuzzleMode {
+  STORY
+  RANDOM
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+  EXPERT
+}
+
+enum ClueType {
+  ADJACENT_TO_OBJECT
+  IN_AREA
+  ISOLATED_IN_CORNER
+  ISOLATED_IN_AREA
+  DIRECTIONAL_TO_CHARACTER
+  DIRECTIONAL_TO_VICTIM
+  ABSOLUTE_ROW
+  ABSOLUTE_COLUMN
+  SAME_AREA_AS
+  NEVER_SAME_ROW_AS
+  NEVER_SAME_COLUMN_AS
+}
+
+// ---------------------------------------------------------------------------
+// UTENTE
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  theme        Theme    @default(DARK)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  refreshTokens      RefreshToken[]
+  storyProgress      StoryProgress[]
+  userBadges         UserBadge[]
+  randomStats        RandomStats?
+  passwordResetTokens PasswordResetToken[]
+
+  @@map("users")
+}
+
+// Sessioni di refresh token separate (revocabili singolarmente, multi-device)
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// MODALITÀ STORIA
+// ---------------------------------------------------------------------------
+
+model StoryProgress {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chapterNumber Int
+  levelNumber   Int
+  status        StoryStatus @default(LOCKED)
+  stars         Int         @default(0)
+  completedAt   DateTime?
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([userId, chapterNumber, levelNumber])
+  @@index([userId])
+  @@map("story_progress")
+}
+
+model Badge {
+  id            String   @id @default(cuid())
+  chapterNumber Int      @unique
+  name          String
+  description   String
+  iconKey       String
+
+  userBadges UserBadge[]
+
+  @@map("badges")
+}
+
+model UserBadge {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  badgeId    String
+  badge      Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  unlockedAt DateTime @default(now())
+
+  @@unique([userId, badgeId])
+  @@index([userId])
+  @@map("user_badges")
+}
+
+// ---------------------------------------------------------------------------
+// MODALITÀ RANDOM — STATISTICHE
+// ---------------------------------------------------------------------------
+
+model RandomStats {
+  id                    String    @id @default(cuid())
+  userId                String    @unique
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  puzzlesCompleted      Int       @default(0)
+  totalTimePlayedSeconds Int      @default(0)
+  currentStreak         Int       @default(0)
+  longestStreak         Int       @default(0)
+  lastPlayedAt          DateTime?
+
+  @@map("random_stats")
+}
+
+// ---------------------------------------------------------------------------
+// PUZZLE (Storia salvata + cache Random)
+// ---------------------------------------------------------------------------
+
+model Puzzle {
+  id            String     @id @default(cuid())
+  mode          PuzzleMode
+  chapterNumber Int?
+  levelNumber   Int?
+  gridSize      Int
+  theme         String
+  title         String
+  introText     String
+  difficulty    Difficulty
+  generatedAt   DateTime   @default(now())
+
+  // Soluzione serializzata, MAI esposta via API di lettura puzzle
+  solutionData  Json
+
+  characters Character[]
+  gridCells  GridCell[]
+
+  // Garantisce un solo puzzle "canonico" per livello Storia, condiviso tra
+  // tutti gli utenti (cache: generato alla prima richiesta, poi riusato).
+  // Per i puzzle RANDOM chapterNumber/levelNumber sono NULL: in Postgres
+  // più righe con NULL in una colonna unique coesistono senza conflitto.
+  @@unique([mode, chapterNumber, levelNumber])
+  @@map("puzzles")
+}
+
+model Character {
+  id          String   @id @default(cuid())
+  puzzleId    String
+  puzzle      Puzzle   @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+  name        String
+  isVictim    Boolean  @default(false)
+  isKiller    Boolean  @default(false)
+  clueText    String
+  clueType    ClueType
+  solutionRow Int
+  solutionCol Int
+
+  @@index([puzzleId])
+  @@map("characters")
+}
+
+model GridCell {
+  id            String  @id @default(cuid())
+  puzzleId      String
+  puzzle        Puzzle  @relation(fields: [puzzleId], references: [id], onDelete: Cascade)
+  row           Int
+  col           Int
+  areaName      String
+  objectKey     String?
+  isOccupiable  Boolean @default(true)
+
+  @@unique([puzzleId, row, col])
+  @@index([puzzleId])
+  @@map("grid_cells")
+}
