@@ -35,6 +35,5 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
-# Applica le migration pendenti e poi avvia il server. In caso di primo
-# deploy su un DB vuoto, `migrate deploy` crea lo schema da zero.
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+# Usa lo script canonico di package.json: migration, seed idempotente e server.
+CMD ["npm", "run", "start"]
