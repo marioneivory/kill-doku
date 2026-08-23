@@ -3,5 +3,6 @@ backend/dist/
 backend/.env
 mobile/node_modules/
 mobile/.expo/
+mobile/dist/
 mobile/.env
 .DS_Store
